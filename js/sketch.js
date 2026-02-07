@@ -1,9 +1,9 @@
 // TeaLeaf Generator - p5.js version
 // Replicates the logic from generateTeaLeaf.c
 
-const NUM_PIXELS = 512;  // Nearest power of 2 for efficiency (C code uses 420)
+const NUM_PIXELS = 420;  // Must match C code
 const FREQUENCY_CUTOFF = 5;
-const THRESHOLD = NUM_PIXELS * NUM_PIXELS / 2;
+const THRESHOLD = (NUM_PIXELS * NUM_PIXELS) / 2;  // 88200
 
 // Mulberry32 PRNG - seedable random number generator
 function mulberry32(seed) {
@@ -36,13 +36,10 @@ class Complex {
       this.real * other.imag + this.imag * other.real
     );
   }
-
-  scale(factor) {
-    return new Complex(this.real * factor, this.imag * factor);
-  }
 }
 
 // 1D FFT (Cooley-Tukey algorithm)
+// FFTW-style: forward is standard, backward is NOT normalized
 function fft1d(input, inverse = false) {
   const n = input.length;
   if (n <= 1) return input.map(x => new Complex(x.real, x.imag));
@@ -78,12 +75,8 @@ function fft1d(input, inverse = false) {
     }
   }
 
-  // Scale for inverse FFT
-  if (inverse) {
-    for (let i = 0; i < n; i++) {
-      result[i] = result[i].scale(1 / n);
-    }
-  }
+  // FFTW-style: NO normalization for inverse (like FFTW's FFTW_BACKWARD)
+  // The values will be N times larger than normalized FFT
 
   return result;
 }
@@ -115,16 +108,17 @@ function fft2d(matrix, inverse = false) {
 }
 
 // Check if a frequency position should be masked (low-pass filter)
+// Only keep low frequencies (near the corners after FFT shift)
 function masked(row, column, n) {
-  return (FREQUENCY_CUTOFF <= row && row <= n - FREQUENCY_CUTOFF) ||
-         (FREQUENCY_CUTOFF <= column && column <= n - FREQUENCY_CUTOFF);
+  return (FREQUENCY_CUTOFF <= row && row < n - FREQUENCY_CUTOFF) ||
+         (FREQUENCY_CUTOFF <= column && column < n - FREQUENCY_CUTOFF);
 }
 
 // Generate the tea leaf pattern
 function generateTeaLeaf(seed) {
   const rand = mulberry32(seed);
 
-  // Initialize input with random binary values (0 or 1)
+  // Initialize input with random binary values (0 or 1), matching C's rand() % 2
   const input = [];
   for (let i = 0; i < NUM_PIXELS; i++) {
     const row = [];
@@ -137,7 +131,7 @@ function generateTeaLeaf(seed) {
   // Forward FFT
   const middle = fft2d(input, false);
 
-  // Apply low-pass filter (mask high frequencies)
+  // Apply low-pass filter (zero out high frequencies)
   for (let i = 0; i < NUM_PIXELS; i++) {
     for (let j = 0; j < NUM_PIXELS; j++) {
       if (masked(i, j, NUM_PIXELS)) {
@@ -146,7 +140,7 @@ function generateTeaLeaf(seed) {
     }
   }
 
-  // Inverse FFT
+  // Inverse FFT (FFTW-style, not normalized)
   const output = fft2d(middle, true);
 
   return output;
@@ -163,7 +157,7 @@ function getSeedFromQueryString() {
   // Prepend "tealeaf::" as in the C code
   const seedString = 'tealeaf::' + query;
 
-  // Sum ASCII values to get seed (matching C code behavior)
+  // Sum ASCII values to get seed (matching C code behavior exactly)
   let seed = 0;
   for (let i = 0; i < seedString.length; i++) {
     seed = seed + seedString.charCodeAt(i);
@@ -180,6 +174,8 @@ function setup() {
   noLoop();
 
   const seed = getSeedFromQueryString();
+  console.log('Seed:', seed);
+
   const teaLeaf = generateTeaLeaf(seed);
 
   // Create image from the generated data
@@ -187,14 +183,20 @@ function setup() {
   teaLeafImage.loadPixels();
 
   let idx = 0;
+  let minVal = Infinity;
+  let maxVal = -Infinity;
+
   for (let y = 0; y < NUM_PIXELS; y++) {
     for (let x = 0; x < NUM_PIXELS; x++) {
       // Get the real component of the inverse FFT result
       const value = teaLeaf[y][x].real;
 
-      // Color based on threshold (matching C code)
+      if (value < minVal) minVal = value;
+      if (value > maxVal) maxVal = value;
+
+      // Color based on threshold (matching C code exactly)
       if (value > THRESHOLD) {
-        // #5466f9 - blue color for "blobs"
+        // #5466f9 - blue color for "blobs" (C code uses 0x54, 0x66, 0xf9 for R,G,B)
         teaLeafImage.pixels[idx] = 0x54;     // R
         teaLeafImage.pixels[idx + 1] = 0x66; // G
         teaLeafImage.pixels[idx + 2] = 0xf9; // B
@@ -209,6 +211,9 @@ function setup() {
       idx += 4;
     }
   }
+
+  console.log('Value range:', minVal, 'to', maxVal);
+  console.log('Threshold:', THRESHOLD);
 
   teaLeafImage.updatePixels();
 }

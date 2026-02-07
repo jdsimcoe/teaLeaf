@@ -2,6 +2,7 @@
 // Replicates the logic from generateTeaLeaf.c
 
 const NUM_PIXELS = 420;  // Must match C code
+const FFT_SIZE = 512;    // Nearest power of 2 >= NUM_PIXELS for FFT
 const FREQUENCY_CUTOFF = 5;
 const THRESHOLD = (NUM_PIXELS * NUM_PIXELS) / 2;  // 88200
 
@@ -119,11 +120,16 @@ function generateTeaLeaf(seed) {
   const rand = mulberry32(seed);
 
   // Initialize input with random binary values (0 or 1), matching C's rand() % 2
+  // Pad to FFT_SIZE (power of 2) for the FFT algorithm
   const input = [];
-  for (let i = 0; i < NUM_PIXELS; i++) {
+  for (let i = 0; i < FFT_SIZE; i++) {
     const row = [];
-    for (let j = 0; j < NUM_PIXELS; j++) {
-      row.push(new Complex(Math.floor(rand() * 2), 0));
+    for (let j = 0; j < FFT_SIZE; j++) {
+      if (i < NUM_PIXELS && j < NUM_PIXELS) {
+        row.push(new Complex(Math.floor(rand() * 2), 0));
+      } else {
+        row.push(new Complex(0, 0));  // Zero padding
+      }
     }
     input.push(row);
   }
@@ -132,9 +138,9 @@ function generateTeaLeaf(seed) {
   const middle = fft2d(input, false);
 
   // Apply low-pass filter (zero out high frequencies)
-  for (let i = 0; i < NUM_PIXELS; i++) {
-    for (let j = 0; j < NUM_PIXELS; j++) {
-      if (masked(i, j, NUM_PIXELS)) {
+  for (let i = 0; i < FFT_SIZE; i++) {
+    for (let j = 0; j < FFT_SIZE; j++) {
+      if (masked(i, j, FFT_SIZE)) {
         middle[i][j] = new Complex(0, 0);
       }
     }

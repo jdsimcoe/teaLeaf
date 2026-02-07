@@ -175,7 +175,8 @@ function getSeedFromQueryString() {
 let teaLeafImage;
 
 function setup() {
-  createCanvas(NUM_PIXELS, NUM_PIXELS);
+  const canvas = createCanvas(NUM_PIXELS, NUM_PIXELS);
+  canvas.parent('canvas-container');
   noLoop();
 
   const seed = getSeedFromQueryString();

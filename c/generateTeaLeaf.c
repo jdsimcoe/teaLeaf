@@ -11,7 +11,6 @@
 #define NUM_PIXELS 420
 #define FREQUENCY_CUTOFF 5
 
-
 typedef struct _bmp_header
 {
   uint16_t                bfheader; // 0
@@ -38,9 +37,6 @@ typedef struct _bmp_pixel
 	unsigned char red;
 	unsigned char alpha;
 } bmp_pixel;
-
-
-
 
 fftw_complex *generateTeaLeaf(uint32_t seed);
 bool masked(uint32_t row, uint32_t column);

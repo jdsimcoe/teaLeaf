@@ -9,7 +9,6 @@ import qualified Data.ByteString.Lazy as B
 import Data.ByteString.Char8 (unpack)
 import System.Process (callProcess)
 
-
 app :: Application
 app request respond = do
   let queryString = "tealeaf::" <> ( unpack $ rawQueryString request )
@@ -21,4 +20,4 @@ app request respond = do
 
 main :: IO ()
 main = do
-    run 80 app
+    run 8080 app

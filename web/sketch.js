@@ -9,8 +9,6 @@
 const NUM_PIXELS = 420;
 const FREQUENCY_CUTOFF = 5;
 
-let cosTable;
-let sinTable;
 
 function setup() {
   const holder = document.getElementById("sketch-holder");
@@ -35,12 +33,11 @@ function setup() {
   const outRe = new Float64Array(total);
   const outIm = new Float64Array(total);
 
-  precomputeTwiddles(NUM_PIXELS);
   fillRandomBinary(inRe, inIm, seed);
 
-  dft2d(inRe, inIm, midRe, midIm, true);
+  tealeafFft2d(inRe, inIm, midRe, midIm, false);
   applyFrequencyMask(midRe, midIm);
-  dft2d(midRe, midIm, outRe, outIm, false);
+  tealeafFft2d(midRe, midIm, outRe, outIm, true);
 
   // Allow the browser a chance to paint before heavy SVG generation.
   renderTeaLeaf(outRe);
@@ -56,7 +53,15 @@ function getQuerySeed() {
   const raw = window.location.search || "";
   // Match original server behavior: seed uses "tealeaf::" + raw query string.
   // raw query string includes the leading "?" if present.
-  return `tealeaf::${raw || ""}`;
+  if (raw && raw !== "?") {
+    return `tealeaf::${raw}`;
+  }
+  const path = window.location.pathname || "";
+  const trimmedPath = path.startsWith("/") ? path.slice(1) : path;
+  if (trimmedPath) {
+    return `tealeaf::?${trimmedPath}`;
+  }
+  return "tealeaf::";
 }
 
 function seedFromString(text) {
@@ -68,12 +73,16 @@ function seedFromString(text) {
 }
 
 function makeRng(seed) {
-  // ANSI C-style LCG to approximate C rand() behavior.
-  // state is 31-bit, rand() = (state >> 16) & 0x7fff
-  let state = (seed >>> 0) & 0x7fffffff;
+  // Park-Miller minimal standard RNG using Schrage method (matches macOS rand()).
+  let state = (seed >>> 0) % 2147483647;
+  if (state === 0) state = 1;
   return function nextRand() {
-    state = (Math.imul(1103515245, state) + 12345) & 0x7fffffff;
-    return (state >>> 16) & 0x7fff;
+    const hi = Math.floor(state / 127773);
+    const lo = state - hi * 127773;
+    let test = 16807 * lo - 2836 * hi;
+    if (test <= 0) test += 2147483647;
+    state = test;
+    return state;
   };
 }
 
@@ -85,81 +94,6 @@ function fillRandomBinary(re, im, seed) {
   }
 }
 
-function precomputeTwiddles(n) {
-  const total = n * n;
-  cosTable = new Float64Array(total);
-  sinTable = new Float64Array(total);
-  const twoPiOverN = (2 * Math.PI) / n;
-  for (let k = 0; k < n; k += 1) {
-    for (let t = 0; t < n; t += 1) {
-      const angle = twoPiOverN * k * t;
-      const idx = k * n + t;
-      cosTable[idx] = Math.cos(angle);
-      sinTable[idx] = Math.sin(angle);
-    }
-  }
-}
-
-function dft2d(inRe, inIm, outRe, outIm, forward) {
-  const n = NUM_PIXELS;
-  const total = n * n;
-  const tempRe = new Float64Array(total);
-  const tempIm = new Float64Array(total);
-
-  // Row-wise DFT
-  for (let row = 0; row < n; row += 1) {
-    for (let k = 0; k < n; k += 1) {
-      let sumRe = 0.0;
-      let sumIm = 0.0;
-      const twiddleRow = k * n;
-      for (let t = 0; t < n; t += 1) {
-        const idx = row * n + t;
-        const aRe = inRe[idx];
-        const aIm = inIm[idx];
-        const cosv = cosTable[twiddleRow + t];
-        const sinv = sinTable[twiddleRow + t];
-        if (forward) {
-          // (aRe + i aIm) * (cos - i sin)
-          sumRe += aRe * cosv + aIm * sinv;
-          sumIm += aIm * cosv - aRe * sinv;
-        } else {
-          // (aRe + i aIm) * (cos + i sin)
-          sumRe += aRe * cosv - aIm * sinv;
-          sumIm += aRe * sinv + aIm * cosv;
-        }
-      }
-      const outIdx = row * n + k;
-      tempRe[outIdx] = sumRe;
-      tempIm[outIdx] = sumIm;
-    }
-  }
-
-  // Column-wise DFT
-  for (let col = 0; col < n; col += 1) {
-    for (let k = 0; k < n; k += 1) {
-      let sumRe = 0.0;
-      let sumIm = 0.0;
-      const twiddleRow = k * n;
-      for (let t = 0; t < n; t += 1) {
-        const idx = t * n + col;
-        const aRe = tempRe[idx];
-        const aIm = tempIm[idx];
-        const cosv = cosTable[twiddleRow + t];
-        const sinv = sinTable[twiddleRow + t];
-        if (forward) {
-          sumRe += aRe * cosv + aIm * sinv;
-          sumIm += aIm * cosv - aRe * sinv;
-        } else {
-          sumRe += aRe * cosv - aIm * sinv;
-          sumIm += aRe * sinv + aIm * cosv;
-        }
-      }
-      const outIdx = k * n + col;
-      outRe[outIdx] = sumRe;
-      outIm[outIdx] = sumIm;
-    }
-  }
-}
 
 function applyFrequencyMask(re, im) {
   const n = NUM_PIXELS;
@@ -187,7 +121,10 @@ function renderTeaLeaf(outRe) {
   clear();
   loadPixels();
   for (let i = 0; i < outRe.length; i += 1) {
-    const idx = i * 4;
+    const row = Math.floor(i / n);
+    const col = i % n;
+    const flippedRow = n - 1 - row;
+    const idx = (flippedRow * n + col) * 4;
     if (outRe[i] > threshold) {
       pixels[idx + 0] = 0x54; // R
       pixels[idx + 1] = 0x66; // G
@@ -209,6 +146,7 @@ function renderTeaLeafSvg(outRe) {
   let path = "";
   for (let y = 0; y < n; y += 1) {
     let x = 0;
+    const flippedY = n - 1 - y;
     while (x < n) {
       const idx = y * n + x;
       if (outRe[idx] > threshold) {
@@ -217,7 +155,7 @@ function renderTeaLeafSvg(outRe) {
           run += 1;
         }
         // Rectangle as a subpath: M x y h run v 1 h -run Z
-        path += `M ${x} ${y} h ${run} v 1 h ${-run} Z `;
+        path += `M ${x} ${flippedY} h ${run} v 1 h ${-run} Z `;
         x += run;
       } else {
         x += 1;

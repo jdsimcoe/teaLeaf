@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeaLeaf Generator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        main {
+            text-align: center;
+            padding: 20px;
+        }
+        #defaultCanvas0 {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .info {
+            margin-top: 20px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>TeaLeaf Generator</h1>
+        <div id="sketch-container"></div>
+        <div class="info">
+            <p>Add a query string to the URL to generate different patterns</p>
+            <p>Example: <code>?hello</code> or <code>?foo=bar</code></p>
+        </div>
+    </main>
+    <script src="sketch.js"></script>
+</body>
+</html>

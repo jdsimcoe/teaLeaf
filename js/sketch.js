@@ -1,152 +1,57 @@
 // TeaLeaf Generator - p5.js version
-// Replicates the logic from generateTeaLeaf.c
+// Replicates the logic from generateTeaLeaf.c using Bluestein's algorithm for FFT
 
-const NUM_PIXELS = 420;  // Must match C code
-const FFT_SIZE = 512;    // Nearest power of 2 >= NUM_PIXELS for FFT
+const NUM_PIXELS = 420;  // Must match C code exactly
 const FREQUENCY_CUTOFF = 5;
 const THRESHOLD = (NUM_PIXELS * NUM_PIXELS) / 2;  // 88200
 
-// Mulberry32 PRNG - seedable random number generator
-function mulberry32(seed) {
+// Seeded random number generator (standard LCG matching C's rand())
+// C's rand() uses: seed = seed * 1103515245 + 12345, returns (seed / 65536) % 32768
+function createLCG(seed) {
+  let state = seed >>> 0;
   return function() {
-    let t = seed += 0x6D2B79F5;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    state = (state * 1103515245 + 12345) >>> 0;
+    return (state >> 16) & 0x7fff;
   };
 }
 
-// Complex number operations
-class Complex {
-  constructor(real = 0, imag = 0) {
-    this.real = real;
-    this.imag = imag;
-  }
-
-  add(other) {
-    return new Complex(this.real + other.real, this.imag + other.imag);
-  }
-
-  sub(other) {
-    return new Complex(this.real - other.real, this.imag - other.imag);
-  }
-
-  mul(other) {
-    return new Complex(
-      this.real * other.real - this.imag * other.imag,
-      this.real * other.imag + this.imag * other.real
-    );
-  }
+// Check if a frequency position should be masked
+// C code: returns true if position should be zeroed out
+// masked(row, col) = (5 <= row <= 415) || (5 <= col <= 415)
+function masked(row, column) {
+  return (FREQUENCY_CUTOFF <= row && row <= NUM_PIXELS - FREQUENCY_CUTOFF) ||
+         (FREQUENCY_CUTOFF <= column && column <= NUM_PIXELS - FREQUENCY_CUTOFF);
 }
 
-// 1D FFT (Cooley-Tukey algorithm)
-// FFTW-style: forward is standard, backward is NOT normalized
-function fft1d(input, inverse = false) {
-  const n = input.length;
-  if (n <= 1) return input.map(x => new Complex(x.real, x.imag));
-
-  // Bit reversal permutation
-  const result = new Array(n);
-  for (let i = 0; i < n; i++) {
-    let j = 0;
-    let bit = n >> 1;
-    let x = i;
-    while (bit > 0) {
-      j = (j << 1) | (x & 1);
-      x >>= 1;
-      bit >>= 1;
-    }
-    result[i] = new Complex(input[j].real, input[j].imag);
-  }
-
-  // Butterfly operations
-  const sign = inverse ? 1 : -1;
-  for (let len = 2; len <= n; len <<= 1) {
-    const angle = (2 * Math.PI / len) * sign;
-    const wlen = new Complex(Math.cos(angle), Math.sin(angle));
-    for (let i = 0; i < n; i += len) {
-      let w = new Complex(1, 0);
-      for (let j = 0; j < len / 2; j++) {
-        const u = result[i + j];
-        const v = result[i + j + len / 2].mul(w);
-        result[i + j] = u.add(v);
-        result[i + j + len / 2] = u.sub(v);
-        w = w.mul(wlen);
-      }
-    }
-  }
-
-  // FFTW-style: NO normalization for inverse (like FFTW's FFTW_BACKWARD)
-  // The values will be N times larger than normalized FFT
-
-  return result;
-}
-
-// 2D FFT
-function fft2d(matrix, inverse = false) {
-  const n = matrix.length;
-
-  // FFT on rows
-  const rowTransformed = [];
-  for (let i = 0; i < n; i++) {
-    rowTransformed.push(fft1d(matrix[i], inverse));
-  }
-
-  // FFT on columns
-  const result = Array(n).fill(null).map(() => Array(n).fill(null));
-  for (let j = 0; j < n; j++) {
-    const column = [];
-    for (let i = 0; i < n; i++) {
-      column.push(rowTransformed[i][j]);
-    }
-    const transformedColumn = fft1d(column, inverse);
-    for (let i = 0; i < n; i++) {
-      result[i][j] = transformedColumn[i];
-    }
-  }
-
-  return result;
-}
-
-// Check if a frequency position should be masked (low-pass filter)
-// Only keep low frequencies (near the corners after FFT shift)
-function masked(row, column, n) {
-  return (FREQUENCY_CUTOFF <= row && row < n - FREQUENCY_CUTOFF) ||
-         (FREQUENCY_CUTOFF <= column && column < n - FREQUENCY_CUTOFF);
-}
-
-// Generate the tea leaf pattern
+// Generate the tea leaf pattern using exact C algorithm
 function generateTeaLeaf(seed) {
-  const rand = mulberry32(seed);
+  const rand = createLCG(seed);
 
-  // Initialize input with random binary values (0 or 1), matching C's rand() % 2
-  // Pad to FFT_SIZE (power of 2) for the FFT algorithm
+  // Initialize input with random binary values (0 or 1)
+  // C code: in[i][0] = (double) (rand() % 2);
   const input = [];
-  for (let i = 0; i < FFT_SIZE; i++) {
+  for (let i = 0; i < NUM_PIXELS; i++) {
     const row = [];
-    for (let j = 0; j < FFT_SIZE; j++) {
-      if (i < NUM_PIXELS && j < NUM_PIXELS) {
-        row.push(new Complex(Math.floor(rand() * 2), 0));
-      } else {
-        row.push(new Complex(0, 0));  // Zero padding
-      }
+    for (let j = 0; j < NUM_PIXELS; j++) {
+      row.push(new Complex(rand() % 2, 0));
     }
     input.push(row);
   }
 
-  // Forward FFT
+  // Forward 2D FFT
   const middle = fft2d(input, false);
 
-  // Apply low-pass filter (zero out high frequencies)
-  for (let i = 0; i < FFT_SIZE; i++) {
-    for (let j = 0; j < FFT_SIZE; j++) {
-      if (masked(i, j, FFT_SIZE)) {
+  // Apply frequency mask (zero out high frequencies)
+  // C code zeros out the middle frequencies
+  for (let i = 0; i < NUM_PIXELS; i++) {
+    for (let j = 0; j < NUM_PIXELS; j++) {
+      if (masked(i, j)) {
         middle[i][j] = new Complex(0, 0);
       }
     }
   }
 
-  // Inverse FFT (FFTW-style, not normalized)
+  // Inverse 2D FFT (FFTW-style, NOT normalized)
   const output = fft2d(middle, true);
 
   return output;
@@ -181,6 +86,7 @@ function setup() {
 
   const seed = getSeedFromQueryString();
   console.log('Seed:', seed);
+  console.log('Query:', window.location.search);
 
   const teaLeaf = generateTeaLeaf(seed);
 
@@ -195,17 +101,20 @@ function setup() {
   for (let y = 0; y < NUM_PIXELS; y++) {
     for (let x = 0; x < NUM_PIXELS; x++) {
       // Get the real component of the inverse FFT result
+      // C code stores data row by row: row = i / NUM_PIXELS, col = i % NUM_PIXELS
       const value = teaLeaf[y][x].real;
 
       if (value < minVal) minVal = value;
       if (value > maxVal) maxVal = value;
 
       // Color based on threshold (matching C code exactly)
+      // C code: if (teaLeaf[i][0] > NUM_PIXELS * NUM_PIXELS / 2)
       if (value > THRESHOLD) {
-        // #5466f9 - blue color for "blobs" (C code uses 0x54, 0x66, 0xf9 for R,G,B)
-        teaLeafImage.pixels[idx] = 0x54;     // R
-        teaLeafImage.pixels[idx + 1] = 0x66; // G
-        teaLeafImage.pixels[idx + 2] = 0xf9; // B
+        // #5466f9 - blue color for "blobs"
+        // C code: blue = 0xf9, green = 0x66, red = 0x54, alpha = 255
+        teaLeafImage.pixels[idx] = 0x54;     // R (84)
+        teaLeafImage.pixels[idx + 1] = 0x66; // G (102)
+        teaLeafImage.pixels[idx + 2] = 0xf9; // B (249)
         teaLeafImage.pixels[idx + 3] = 255;  // A (opaque)
       } else {
         // White/transparent background

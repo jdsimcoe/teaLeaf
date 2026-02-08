@@ -8,7 +8,11 @@
 
 const NUM_PIXELS = 420;
 const FREQUENCY_CUTOFF = 5;
+const DEFAULT_COLOR = "#000000";
+const DEFAULT_BG = null;
 
+let fillColor = DEFAULT_COLOR;
+let bgColor = DEFAULT_BG;
 
 function setup() {
   const holder = document.getElementById("sketch-holder");
@@ -24,6 +28,8 @@ function setup() {
 
   const seedText = getQuerySeed();
   const seed = seedFromString(seedText);
+  fillColor = getColorOverride();
+  bgColor = getBgOverride();
 
   const total = NUM_PIXELS * NUM_PIXELS;
   const inRe = new Float64Array(total);
@@ -53,8 +59,9 @@ function getQuerySeed() {
   const raw = window.location.search || "";
   // Match original server behavior: seed uses "tealeaf::" + raw query string.
   // raw query string includes the leading "?" if present.
-  if (raw && raw !== "?") {
-    return `tealeaf::${raw}`;
+  const seedRaw = stripSeedParams(raw);
+  if (seedRaw && seedRaw !== "?") {
+    return `tealeaf::${seedRaw}`;
   }
   const path = window.location.pathname || "";
   const trimmedPath = path.startsWith("/") ? path.slice(1) : path;
@@ -62,6 +69,36 @@ function getQuerySeed() {
     return `tealeaf::?${trimmedPath}`;
   }
   return "tealeaf::";
+}
+
+function stripSeedParams(raw) {
+  if (!raw || raw === "?") return raw;
+  const trimmed = raw.startsWith("?") ? raw.slice(1) : raw;
+  const parts = trimmed.split("&").filter((part) => part.length > 0);
+  const filtered = parts.filter(
+    (part) => !part.startsWith("color=") && !part.startsWith("bg=")
+  );
+  if (filtered.length === 0) return "?";
+  return `?${filtered.join("&")}`;
+}
+
+function getColorOverride() {
+  return getHexParam("color", DEFAULT_COLOR);
+}
+
+function getBgOverride() {
+  return getHexParam("bg", DEFAULT_BG);
+}
+
+function getHexParam(name, fallback) {
+  const params = new URLSearchParams(window.location.search || "");
+  const raw = params.get(name);
+  if (!raw) return fallback;
+  const cleaned = raw.replace(/^#/, "").trim();
+  if (/^[0-9a-fA-F]{6}$/.test(cleaned) || /^[0-9a-fA-F]{3}$/.test(cleaned)) {
+    return `#${cleaned.toLowerCase()}`;
+  }
+  return fallback;
 }
 
 function seedFromString(text) {
@@ -94,7 +131,6 @@ function fillRandomBinary(re, im, seed) {
   }
 }
 
-
 function applyFrequencyMask(re, im) {
   const n = NUM_PIXELS;
   for (let i = 0; i < re.length; i += 1) {
@@ -126,15 +162,24 @@ function renderTeaLeaf(outRe) {
     const flippedRow = n - 1 - row;
     const idx = (flippedRow * n + col) * 4;
     if (outRe[i] > threshold) {
-      pixels[idx + 0] = 0x54; // R
-      pixels[idx + 1] = 0x66; // G
-      pixels[idx + 2] = 0xf9; // B
-      pixels[idx + 3] = 255;  // A
+      const rgb = hexToRgb(fillColor);
+      pixels[idx + 0] = rgb.r; // R
+      pixels[idx + 1] = rgb.g; // G
+      pixels[idx + 2] = rgb.b; // B
+      pixels[idx + 3] = 255; // A
     } else {
-      pixels[idx + 0] = 255;
-      pixels[idx + 1] = 255;
-      pixels[idx + 2] = 255;
-      pixels[idx + 3] = 0;    // transparent
+      if (bgColor) {
+        const bg = hexToRgb(bgColor);
+        pixels[idx + 0] = bg.r;
+        pixels[idx + 1] = bg.g;
+        pixels[idx + 2] = bg.b;
+        pixels[idx + 3] = 255;
+      } else {
+        pixels[idx + 0] = 255;
+        pixels[idx + 1] = 255;
+        pixels[idx + 2] = 255;
+        pixels[idx + 3] = 0; // transparent
+      }
     }
   }
   updatePixels();
@@ -165,9 +210,24 @@ function renderTeaLeafSvg(outRe) {
 
   let svg = "";
   svg += `<svg width=\"${n}\" height=\"${n}\" viewBox=\"0 0 ${n} ${n}\" xmlns=\"http://www.w3.org/2000/svg\" shape-rendering=\"crispEdges\">`;
-  svg += `<rect width=\"${n}\" height=\"${n}\" fill=\"transparent\"/>`;
-  svg += `<path d=\"${path.trim()}\" fill=\"#5466f9\"/>`;
+  const bgFill = bgColor || "transparent";
+  svg += `<rect width=\"${n}\" height=\"${n}\" fill=\"${bgFill}\"/>`;
+  svg += `<path d=\"${path.trim()}\" fill=\"${fillColor}\"/>`;
   svg += `</svg>`;
   const holder = document.getElementById("svg-holder");
   if (holder) holder.innerHTML = svg;
+}
+
+function hexToRgb(hex) {
+  const cleaned = hex.replace(/^#/, "");
+  if (cleaned.length === 3) {
+    const r = parseInt(cleaned[0] + cleaned[0], 16);
+    const g = parseInt(cleaned[1] + cleaned[1], 16);
+    const b = parseInt(cleaned[2] + cleaned[2], 16);
+    return { r, g, b };
+  }
+  const r = parseInt(cleaned.slice(0, 2), 16);
+  const g = parseInt(cleaned.slice(2, 4), 16);
+  const b = parseInt(cleaned.slice(4, 6), 16);
+  return { r, g, b };
 }
